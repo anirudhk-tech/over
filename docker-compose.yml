@@ -27,7 +27,23 @@ services:
   # Usage: docker compose run ingester python -m main --limit 100
   # -----------------------------------------------------------------------
   ingester:
-    build: ./server/ingester
+    build:
+      context: ./server
+      dockerfile: ingester/Dockerfile
+    env_file: ./server/.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/creds/key.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/creds/key.json:ro
+
+  # -----------------------------------------------------------------------
+  # Chunker — splits book texts into sections, produces to book-chunks
+  # Usage: docker compose up chunker
+  # -----------------------------------------------------------------------
+  chunker:
+    build:
+      context: ./server
+      dockerfile: chunker/Dockerfile
     env_file: ./server/.env
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/creds/key.json
