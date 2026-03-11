@@ -15,14 +15,8 @@ variable "dataset_id" {
   default     = "overdue"
 }
 
-variable "enable_billing_resources" {
-  description = "Set to true to create GCS bucket + service account (requires billing). Set to false for BigQuery sandbox mode."
-  type        = bool
-  default     = false
-}
-
 variable "gcs_bucket_name" {
-  description = "GCS bucket for staging raw data dumps (only used when enable_billing_resources = true)"
+  description = "GCS bucket for raw book texts. Defaults to {project_id}-overdue-books."
   type        = string
   default     = ""
 }
