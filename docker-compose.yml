@@ -49,3 +49,13 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/creds/key.json
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/creds/key.json:ro
+
+  # -----------------------------------------------------------------------
+  # NLP Worker — analyzes chunks, produces arc scores to arc-events
+  # Scale up for faster processing: docker compose up --scale nlp-worker=4
+  # -----------------------------------------------------------------------
+  nlp-worker:
+    build:
+      context: ./server
+      dockerfile: nlp-worker/Dockerfile
+    env_file: ./server/.env

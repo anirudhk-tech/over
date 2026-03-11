@@ -38,3 +38,8 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
 uvicorn==0.41.0
+
+# NLP Worker
+transformers>=4.46.0
+torch>=2.5.0
+spacy>=3.8.0
