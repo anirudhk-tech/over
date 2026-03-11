@@ -158,13 +158,14 @@ def analyze(chunk: dict) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Print results to stdout instead of producing to Kafka")
+    parser.add_argument("--group-id", type=str, default="nlp-worker", help="Kafka consumer group ID (use a temp value with --dry-run to avoid moving the real offset)")
     args = parser.parse_args()
 
     producer = None if args.dry_run else Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})
 
     consumer = Consumer({
         "bootstrap.servers": KAFKA_BOOTSTRAP,
-        "group.id": "nlp-worker",
+        "group.id": args.group_id,
         "auto.offset.reset": "earliest",
     })
     consumer.subscribe([CONSUME_TOPIC])
