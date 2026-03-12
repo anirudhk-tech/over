@@ -158,6 +158,7 @@ def analyze(chunk: dict) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Print results to stdout instead of producing to Kafka")
+    parser.add_argument("--drain", action="store_true", help="Exit automatically when topic is fully consumed")
     parser.add_argument("--group-id", type=str, default="nlp-worker", help="Kafka consumer group ID (use a temp value with --dry-run to avoid moving the real offset)")
     args = parser.parse_args()
 
@@ -174,11 +175,19 @@ def main():
     if args.dry_run:
         log.info("Dry-run mode: printing results, not producing to Kafka")
 
+    idle_polls = 0
+
     try:
         while True:
             msg = consumer.poll(timeout=5.0)
             if msg is None:
+                if args.drain:
+                    idle_polls += 1
+                    if idle_polls >= 3:
+                        log.info("Topic drained, exiting.")
+                        break
                 continue
+            idle_polls = 0
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue

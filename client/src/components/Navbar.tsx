@@ -16,7 +16,7 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5 group">
           <BookOpen size={18} className="text-accent" />
-          <span className="font-serif font-semibold text-text tracking-wide">Overdue</span>
+          <span className="font-serif font-semibold text-text tracking-wide">Bookish</span>
         </Link>
 
         <nav className="flex items-center gap-1">

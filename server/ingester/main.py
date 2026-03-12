@@ -16,6 +16,7 @@ import json
 import logging
 import argparse
 import requests
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 from confluent_kafka import Producer
@@ -51,6 +52,7 @@ def write_book_to_bq(bq: bigquery.Client, book: dict, storage_path: str, word_co
         "publish_year": None,
         "word_count":   word_count,
         "gcs_path":     storage_path if storage_path.startswith("gs://") else None,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
     }
     table_id = f"{BQ_PROJECT}.{BQ_DATASET}.books"
     job = bq.load_table_from_json([row], table_id)

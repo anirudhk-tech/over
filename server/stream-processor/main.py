@@ -60,6 +60,7 @@ def flush(bq: bigquery.Client, rows: list[dict]):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Print rows to stdout instead of writing to BigQuery")
+    parser.add_argument("--drain", action="store_true", help="Exit automatically when topic is fully consumed")
     args = parser.parse_args()
 
     bq = None if args.dry_run else get_bq_client()
@@ -77,13 +78,13 @@ def main():
         log.info("Dry-run mode: printing rows, not writing to BigQuery")
 
     buffer = []
+    idle_polls = 0
 
     try:
         while True:
             msg = consumer.poll(timeout=5.0)
 
             if msg is None:
-                # Idle — flush whatever is buffered
                 if buffer:
                     if args.dry_run:
                         print(json.dumps(buffer, indent=2))
@@ -91,7 +92,13 @@ def main():
                         flush(bq, buffer)
                         consumer.commit()
                     buffer.clear()
+                if args.drain:
+                    idle_polls += 1
+                    if idle_polls >= 3:
+                        log.info("Topic drained, exiting.")
+                        break
                 continue
+            idle_polls = 0
 
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:

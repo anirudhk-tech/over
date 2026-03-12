@@ -21,18 +21,18 @@ function ChapterTooltip({ active, payload }: any) {
       <div className="text-subtle">{(d.position_pct * 100).toFixed(1)}% through book</div>
       <div className="pt-1 space-y-0.5">
         <div className="flex justify-between gap-4">
-          <span className="text-subtle">Tension</span>
-          <span className="text-accent font-medium">{(d.tension_score * 100).toFixed(0)}%</span>
+          <span className="text-subtle">Intensity</span>
+          <span style={{ color: "#ef4444" }} className="font-medium">{(d.tension_score * 100).toFixed(0)}%</span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-subtle">Sentiment</span>
+          <span className="text-subtle">Mood</span>
           <span style={{ color: d.sentiment_score >= 0 ? "#22c55e" : "#ef4444" }}>
             {d.sentiment_score >= 0 ? "+" : ""}{(d.sentiment_score * 100).toFixed(0)}%
           </span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-subtle">Pacing</span>
-          <span className="text-calm">{(d.pacing_score * 100).toFixed(0)}%</span>
+          <span className="text-subtle">Pace</span>
+          <span style={{ color: "#a78bfa" }}>{(d.pacing_score * 100).toFixed(0)}%</span>
         </div>
       </div>
       {d.dominant_characters?.length > 0 && (
@@ -44,7 +44,7 @@ function ChapterTooltip({ active, payload }: any) {
   )
 }
 
-export function ArcChart({ data, showSentiment = true, showPacing = false, color = "#f59e0b" }: Props) {
+export function ArcChart({ data, showSentiment = true, showPacing = false, color = "#ef4444" }: Props) {
   if (!data.length) return (
     <div className="h-64 flex items-center justify-center text-subtle text-sm">
       No arc data yet
@@ -105,7 +105,7 @@ export function ArcChart({ data, showSentiment = true, showPacing = false, color
             strokeWidth={1}
             fill="url(#sentiment-grad)"
             dot={false}
-            name="Sentiment"
+            name="Mood"
           />
         )}
 
@@ -113,11 +113,11 @@ export function ArcChart({ data, showSentiment = true, showPacing = false, color
           <Area
             type="monotone"
             dataKey="pacing_score"
-            stroke="#3b82f6"
+            stroke="#a78bfa"
             strokeWidth={1}
             fill="none"
             dot={false}
-            name="Pacing"
+            name="Pace"
           />
         )}
 
@@ -128,7 +128,7 @@ export function ArcChart({ data, showSentiment = true, showPacing = false, color
           strokeWidth={2}
           fill={`url(#tension-${color.replace("#","")})`}
           dot={false}
-          name="Tension"
+          name="Intensity"
         />
 
         <Legend

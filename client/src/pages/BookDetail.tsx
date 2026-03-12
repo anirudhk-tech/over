@@ -20,7 +20,7 @@ function CharacterTimeline({ characters }: { characters: Character[] }) {
 
   return (
     <div className="card p-5">
-      <h3 className="label mb-4">Character Presence</h3>
+      <h3 className="label mb-4">Who's On Stage</h3>
       <div className="space-y-3">
         {top.map(c => (
           <div key={c.character_name} className="flex items-center gap-3">
@@ -47,11 +47,11 @@ function CharacterTimeline({ characters }: { characters: Character[] }) {
       <div className="mt-3 flex items-center gap-4 text-xs text-subtle">
         <div className="flex items-center gap-1.5">
           <div className="w-3 h-1.5 rounded bg-accent/40 border border-accent/60" />
-          active range
+          on stage
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-1 h-3 rounded bg-accent" />
-          peak presence
+          most prominent
         </div>
       </div>
     </div>
@@ -126,17 +126,17 @@ export function BookDetail() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatBadge
-          label="Avg Tension"
+          label="Overall Intensity"
           value={`${(avgTension * 100).toFixed(0)}%`}
           color={`hsl(${(1 - avgTension) * 120}, 70%, 55%)`}
         />
         <StatBadge
-          label="Peak Tension"
+          label="Climax"
           value={`${(peakTension * 100).toFixed(0)}%`}
           color="#f59e0b"
         />
         <StatBadge
-          label="Peak At"
+          label="Peaks At"
           value={peakChunk ? `${(peakChunk.position_pct * 100).toFixed(0)}% in` : "—"}
         />
         <StatBadge
@@ -148,19 +148,19 @@ export function BookDetail() {
       {/* Arc chart */}
       <div className="card p-5">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <h2 className="label">Narrative Arc</h2>
+          <h2 className="label">Story Arc</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowSentiment(v => !v)}
               className={`px-2.5 py-1 rounded text-xs transition-colors ${showSentiment ? "bg-green-500/20 text-green-400 border border-green-500/30" : "text-subtle hover:text-text"}`}
             >
-              Sentiment
+              Mood
             </button>
             <button
               onClick={() => setShowPacing(v => !v)}
               className={`px-2.5 py-1 rounded text-xs transition-colors ${showPacing ? "bg-calm/20 text-calm border border-calm/30" : "text-subtle hover:text-text"}`}
             >
-              Pacing
+              Pace
             </button>
           </div>
         </div>
@@ -173,7 +173,7 @@ export function BookDetail() {
       {/* Subjects */}
       {book.subjects?.length > 0 && (
         <div className="card p-5">
-          <h3 className="label mb-3">Subjects</h3>
+          <h3 className="label mb-3">Themes</h3>
           <div className="flex flex-wrap gap-2">
             {book.subjects.map(s => (
               <span key={s} className="px-2.5 py-1 bg-muted rounded-md text-xs text-subtle">

@@ -144,6 +144,7 @@ def process_book(book: dict, producer: Producer | None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Print chunks to stdout instead of producing to Kafka")
+    parser.add_argument("--drain", action="store_true", help="Exit automatically when topic is fully consumed")
     args = parser.parse_args()
 
     producer = None if args.dry_run else Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})
@@ -159,11 +160,19 @@ def main():
     if args.dry_run:
         log.info("Dry-run mode: printing chunks, not producing to Kafka")
 
+    idle_polls = 0
+
     try:
         while True:
             msg = consumer.poll(timeout=5.0)
             if msg is None:
+                if args.drain:
+                    idle_polls += 1
+                    if idle_polls >= 3:
+                        log.info("Topic drained, exiting.")
+                        break
                 continue
+            idle_polls = 0
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue

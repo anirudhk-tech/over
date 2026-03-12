@@ -28,9 +28,9 @@ export function Explore() {
   const max = sorted.length ? sorted[0][metric] : 1
 
   const metrics = [
-    { key: "avg_tension",   label: "Tension"   },
-    { key: "avg_sentiment", label: "Sentiment" },
-    { key: "avg_pacing",    label: "Pacing"    },
+    { key: "avg_tension",   label: "Intensity" },
+    { key: "avg_sentiment", label: "Mood"      },
+    { key: "avg_pacing",    label: "Pace"      },
   ] as const
 
   return (
@@ -39,7 +39,7 @@ export function Explore() {
         <p className="label mb-2">Explore</p>
         <h1 className="font-serif text-4xl text-text">Genre Fingerprints</h1>
         <p className="mt-2 text-subtle max-w-lg">
-          Average narrative metrics across genres. See which subjects are tense, uplifting, or fast-paced.
+          Which genres keep you on the edge of your seat? Which ones leave you uplifted? See how stories feel, by subject.
         </p>
       </div>
 
@@ -96,7 +96,7 @@ export function Explore() {
               <Tooltip
                 cursor={{ fill: "#1c1c28" }}
                 contentStyle={{ background: "#111118", border: "1px solid #1c1c28", borderRadius: 8, fontSize: 12 }}
-                formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, metric.replace("avg_", "")]}
+                formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, metrics.find(m => m.key === metric)?.label ?? metric]}
               />
               <Bar dataKey={metric} radius={[0, 4, 4, 0]}>
                 {sorted.map((entry, i) => (
@@ -119,10 +119,10 @@ export function Explore() {
             <thead>
               <tr className="border-b border-border">
                 <th className="text-left p-4 label">Genre</th>
-                <th className="text-right p-4 label">Tension</th>
-                <th className="text-right p-4 label">Sentiment</th>
-                <th className="text-right p-4 label">Pacing</th>
-                <th className="text-right p-4 label">Books</th>
+                <th className="text-right p-4 label">Intensity</th>
+                <th className="text-right p-4 label">Mood</th>
+                <th className="text-right p-4 label">Pace</th>
+                <th className="text-right p-4 label">Titles</th>
               </tr>
             </thead>
             <tbody>

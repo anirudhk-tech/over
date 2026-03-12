@@ -47,7 +47,7 @@ export function BookCard({ book, arc = [], selected, onSelect }: Props) {
         <Sparkline data={arc} width={100} height={28} />
         {maxTension !== null && (
           <div className="text-right">
-            <div className="text-xs text-subtle">peak tension</div>
+            <div className="text-xs text-subtle">climax</div>
             <div
               className="text-sm font-medium"
               style={{ color: `hsl(${(1 - maxTension) * 120}, 70%, 55%)` }}

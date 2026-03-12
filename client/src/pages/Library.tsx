@@ -34,10 +34,10 @@ export function Library() {
     <div className="max-w-7xl mx-auto px-6 py-10">
       {/* Header */}
       <div className="mb-10">
-        <p className="label mb-2">Project Gutenberg · {books.length} books analyzed</p>
+        <p className="label mb-2">Library · {books.length} books analyzed</p>
         <h1 className="font-serif text-4xl text-text">The Shape of Every Story</h1>
         <p className="mt-2 text-subtle max-w-lg">
-          Every book has a tension curve. Browse the catalog and see what yours looks like before you commit.
+          Watch how a book's curve looks like before you commit.
         </p>
       </div>
 
