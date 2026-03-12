@@ -1,267 +1,260 @@
-# Overdue — The Shape of Every Story
+# Bookish — The Shape of Every Story
 
-A narrative analytics engine that processes thousands of books from Project Gutenberg through an NLP pipeline, extracts tension curves, character arcs, and conflict patterns, and lets you explore and compare the structure of stories interactively.
-
-> "Every story has a shape. We make them visible."
+> Narrative arc analysis engine that ingests classics from Project Gutenberg, runs a multi-stage NLP pipeline over Kafka, warehouses results in BigQuery, and renders the emotional shape of every story in an interactive frontend.
 
 ---
 
-## What It Does
+## Overview
 
-Overdue ingests full book texts, splits them into sections, runs NLP analysis on each section, and stores the results in a data warehouse. The frontend lets you:
+Most people pick books by cover, genre, or reviews. Bookish lets you see *inside* the story before you open it — mapping how tension rises, where the climax hits, when characters appear, and how the mood shifts from first page to last.
 
-- Browse a catalog of thousands of books with **tension curve sparklines** as previews
-- Open any book and see its **full narrative arc** — sentiment, tension, character presence, pacing — annotated with key plot moments
-- **Compare books side by side** — overlay their curves to see how different authors structure stories
-- Explore **cross-book insights** powered by BigQuery — genre tension fingerprints, era comparisons, author signatures
-- **Upload your own PDF** and compare it against the Gutenberg catalog
+The backend is a distributed event-driven pipeline: books flow from the Gutenberg API through Kafka, get chunked and NLP-analyzed by parallel workers, and land in BigQuery. The frontend visualizes everything in real time — sparkline previews on every book card, full arc charts, cross-book comparisons, and a data-driven read recommendation engine.
 
 ---
 
 ## Architecture
 
 ```
-Gutenberg API ──→ Ingester ──→ GCS (raw texts)
-                     │
-                     └──→ Kafka: books-to-process
-                                     │
-                              Chunker (Python)
-                                     │
-                              Kafka: book-chunks
-                                     │
-                            NLP Worker (Python)
-                          (sentiment, tension, NER)
-                                     │
-                              Kafka: arc-events
-                                     │
-                        Stream Processor (Kotlin)
-                        (aggregate, validate, sink)
-                                     │
-                                 BigQuery
-                                     │
-                              FastAPI (Python)
-                                     │
-                            Vite Frontend (client)
+Gutenberg API
+     │
+     ▼
+ Ingester (Python)
+  - Fetches catalog via Gutendex
+  - Downloads full-text files
+  - Writes metadata → BigQuery `books`
+  - Produces → Kafka: books-to-process
+     │
+     ▼
+ Chunker (Python)                         consumer group: chunker
+  - Detects chapter boundaries (regex)
+  - Falls back to 500-word sliding windows
+  - Produces → Kafka: book-chunks (8 partitions, round-robin)
+     │
+     ▼
+ NLP Worker (Python)                      consumer group: nlp-worker
+  - DistilBERT sentiment scoring
+  - Tension = negativity × 0.6 + conflict_density × 0.4
+  - spaCy NER → character extraction
+  - Pacing = sentence length variance
+  - Produces → Kafka: arc-events (8 partitions)
+     │
+     ▼
+ Stream Processor (Python / Kotlin ref)   consumer group: stream-processor
+  - Batches arc events (100 rows)
+  - Sinks → BigQuery `book_arcs` via batch load job
+     │
+     ▼
+ BigQuery
+  - `books` — metadata dimension table
+  - `book_arcs` — one row per chunk, range-partitioned on chunk_index
+  - `characters` — computed by post-processing script
+     │
+     ▼
+ FastAPI                                  serves arc + analytics endpoints
+     │
+     ▼
+ Vite + React + Recharts                  interactive arc visualization
 ```
 
 ---
 
 ## Tech Stack
 
-| Tool | Role |
-|------|------|
-| **Python** | Gutenberg ingestion, text chunking, NLP workers (spaCy, Transformers) |
-| **Kotlin** | Stream processor — consumes arc events from Kafka, aggregates, writes to BigQuery |
-| **Kafka** | Pipeline backbone connecting all processing stages |
-| **BigQuery** | Data warehouse for arc data, cross-book analytics queries |
-| **GCS** | Raw book text storage |
-| **Terraform** | All GCP infrastructure as code |
-| **Docker** | Containerized services, local orchestration |
-| **GitLab CI/CD** | Lint, test, build, deploy pipeline |
-| **GCP** | Cloud platform (BigQuery, GCS, Cloud Run) |
-| **Vite** | Interactive frontend |
+| Layer | Tech | Why |
+|---|---|---|
+| **Ingestion** | Python + Gutendex API | Structured access to 70k+ public domain texts, no API key |
+| **Message bus** | Apache Kafka (KRaft, no Zookeeper) | Decoupled pipeline stages, parallel chunk processing across 8 partitions |
+| **NLP** | DistilBERT + spaCy `en_core_web_sm` | Transformer sentiment at scale, lightweight NER for character tracking |
+| **Stream processing** | Python (Kotlin reference impl kept) | Stateless consumer with manual offset commits, flush-on-drain semantics |
+| **Data warehouse** | Google BigQuery | Columnar storage, UNNEST for repeated subjects, free-tier batch loads |
+| **Infrastructure** | Terraform | BigQuery dataset + tables as code, reproducible across environments |
+| **Containerization** | Docker + Docker Compose | Single `server/requirements.txt` shared across all services via build context |
+| **API** | FastAPI + Uvicorn | Async, auto-documented, typed responses |
+| **Frontend** | Vite + React + TypeScript + Recharts + Tailwind CSS v3 | Fast HMR, type-safe API client, custom dark theme |
 
 ---
 
-## Data Pipeline
+## NLP Pipeline Detail
 
-### Stage 1 — Ingest
-The **Ingester** (Python) fetches the Gutenberg catalog via the Gutendex API, downloads full book texts, stores them in GCS, and produces book IDs to the `books-to-process` Kafka topic.
+### Tension Score
+```
+negativity      = (1.0 - sentiment) / 2          # maps [−1, 1] → [0, 1]
+conflict_density = keyword_hits / total_words     # ~200 conflict keywords
+tension_score   = negativity × 0.6 + conflict_density × 0.4
+```
 
-### Stage 2 — Chunk
-The **Chunker** (Python) consumes from `books-to-process`, reads the raw text from GCS, and splits it into sections. Chapters are detected first (by "Chapter X" patterns); if no chapters are found, the text is split into fixed-size windows (~500 words) with overlap. Each chunk is produced to the `book-chunks` Kafka topic with its position metadata.
+Conflict keywords span five categories: **violence**, **death & injury**, **pursuit & threat**, **betrayal**, and **emotional intensity**.
 
-### Stage 3 — Analyze
-The **NLP Worker** (Python) consumes from `book-chunks` and runs:
+### Sentiment
+DistilBERT (`distilbert-base-uncased-finetuned-sst-2-english`) scores each chunk. Raw logits are converted to a continuous `[-1.0, 1.0]` scale — not just positive/negative binary.
 
-- **Sentiment scoring** — a transformer-based sentiment model scores each chunk on a continuous scale (positive ↔ negative)
-- **Tension scoring** — composite of: sentiment volatility in a rolling window, negative sentiment intensity, conflict keyword density (fight, death, betrayal, etc.), and dialogue density
-- **Character extraction** — spaCy NER identifies PERSON entities per chunk; character presence is tracked across the full book
-- **Pacing score** — sentence length variance and dialogue-to-narration ratio
+### Character Extraction
+spaCy NER (`PERSON` entities) per chunk. A post-processing script (`scripts/build_characters.py`) aggregates mention counts, first/last appearance, and peak presence across the full book and writes to the `characters` table.
 
-Results are produced to the `arc-events` Kafka topic.
+### Pacing
+Sentence length variance per chunk — short, punchy sentences = high pacing score. Normalized across the book.
 
-### Stage 4 — Sink
-The **Stream Processor** (Kotlin) consumes from `arc-events`, validates and aggregates results per book, and writes to BigQuery.
+---
+
+## Kafka Design
+
+| Topic | Partitions | Key | Consumer Group |
+|---|---|---|---|
+| `books-to-process` | 1 | none | `chunker` |
+| `book-chunks` | 8 | none (round-robin) | `nlp-worker` |
+| `arc-events` | 8 | none (round-robin) | `stream-processor` |
+
+**Why no partition key on `book-chunks`?** Chunks don't need to be processed in order — each message carries `chunk_index` and `book_id`. BigQuery reconstructs the arc at read time with `ORDER BY chunk_index`. This lets all 8 NLP workers pull from all 8 partitions freely, maximizing parallelism.
+
+**Drain mode:** All consumers support `--drain` — they exit cleanly after 3 consecutive empty polls (15s idle). This makes the pipeline scriptable end-to-end.
+
+**KRaft mode:** Kafka runs without Zookeeper. Cluster metadata is managed internally via the Raft consensus algorithm — one less distributed system to operate.
 
 ---
 
 ## BigQuery Schema
 
 ### `books`
-Book metadata dimension table.
-
-| Column | Type | Description |
-|--------|------|-------------|
+| Column | Type | Notes |
+|---|---|---|
 | `book_id` | STRING | Gutenberg ID |
 | `title` | STRING | |
 | `author` | STRING | |
-| `genre` | STRING | Primary genre |
-| `subjects` | STRING REPEATED | All subject tags |
+| `subjects` | STRING REPEATED | Used with UNNEST for genre aggregations |
 | `language` | STRING | |
 | `publish_year` | INTEGER | |
-| `word_count` | INTEGER | Full text length |
-| `gcs_path` | STRING | Raw text location in GCS |
-| `processed_at` | TIMESTAMP | Last NLP run |
+| `word_count` | INTEGER | |
+| `gcs_path` | STRING | Raw text location (GCS or null for local) |
+| `processed_at` | TIMESTAMP | |
 
 ### `book_arcs`
-Core NLP results — one row per chunk per book.
+One row per chunk per book. Range-partitioned by `chunk_index`, clustered by `book_id`.
 
-| Column | Type | Description |
-|--------|------|-------------|
+| Column | Type | Notes |
+|---|---|---|
 | `book_id` | STRING | |
-| `chunk_index` | INTEGER | Sequential chunk number |
-| `position_pct` | FLOAT | 0.0–1.0 position in book |
-| `chapter` | STRING | Chapter label if detected |
-| `word_count` | INTEGER | Chunk size |
-| `sentiment_score` | FLOAT | -1.0 (negative) to 1.0 (positive) |
-| `tension_score` | FLOAT | 0.0–1.0 composite tension |
-| `pacing_score` | FLOAT | 0.0–1.0 (slow to fast) |
-| `conflict_density` | FLOAT | Conflict keyword ratio |
-| `dominant_characters` | STRING REPEATED | Top characters in this chunk |
-
-*Partitioned by book_id, clustered on chunk_index.*
+| `chunk_index` | INTEGER | Sequential position |
+| `position_pct` | FLOAT | 0.0–1.0 through the book |
+| `chapter` | STRING | Detected chapter label |
+| `word_count` | INTEGER | |
+| `sentiment_score` | FLOAT | −1.0 to 1.0 |
+| `tension_score` | FLOAT | 0.0–1.0 composite |
+| `pacing_score` | FLOAT | 0.0–1.0 |
+| `conflict_density` | FLOAT | Keyword hit ratio |
+| `dominant_characters` | STRING REPEATED | Top NER entities in chunk |
 
 ### `characters`
-Per-book character presence data.
+Computed post-pipeline by `scripts/build_characters.py`.
 
-| Column | Type | Description |
-|--------|------|-------------|
+| Column | Type | Notes |
+|---|---|---|
 | `book_id` | STRING | |
 | `character_name` | STRING | As extracted by NER |
-| `mention_count` | INTEGER | Total across book |
-| `first_appearance_pct` | FLOAT | Where they enter the story |
-| `last_appearance_pct` | FLOAT | Where they exit |
-| `peak_presence_pct` | FLOAT | Position of most mentions |
+| `mention_count` | INTEGER | |
+| `first_appearance_pct` | FLOAT | |
+| `last_appearance_pct` | FLOAT | |
+| `peak_presence_pct` | FLOAT | |
 
----
-
-## Kafka Topics
-
-| Topic | Producer | Consumer | Partitions | Payload |
-|-------|----------|----------|------------|---------|
-| `books-to-process` | Ingester | Chunker | 1 | `{ book_id, title, gcs_path }` |
-| `book-chunks` | Chunker | NLP Worker | 8 | `{ book_id, chunk_index, position_pct, text, chapter }` |
-| `arc-events` | NLP Worker | Stream Processor (Kotlin) | 8 | `{ book_id, chunk_index, sentiment_score, tension_score, ... }` |
-
-Messages on `book-chunks` and `arc-events` are produced with no partition key, so Kafka distributes them evenly across all 8 partitions. Ordering within a book is not required at processing time — each chunk carries `book_id` and `chunk_index`, and the arc is reassembled in order by BigQuery at read time.
+> **Note on free tier:** BigQuery free tier blocks DML (`DELETE`, `INSERT`) and streaming inserts. The pipeline uses `load_table_from_json` (batch load jobs) for all writes. Table clears use `drop + recreate` (DDL) instead of `DELETE FROM`.
 
 ---
 
 ## Frontend
 
-### Library View
-Grid of book cards. Each card shows title, author, genre, and a **sparkline of the tension curve** — so you can see the shape of a story before clicking. Filterable by genre, era, and language. Searchable by title/author.
+### Library
+Book grid with tension sparklines on every card — you see the shape of the story before you click. Skeleton loading, lazy arc fetching.
 
-### Book Detail View
-Full-page arc visualization for a single book:
-- **Main graph** — tension curve across the full book, X-axis is position (%), Y-axis is score. Annotated with chapter markers and detected peak moments.
-- **Sentiment track** — emotional tone across the book, overlaid or in a separate lane
-- **Character presence** — stacked/swimlane view of when each major character is active
-- **Pacing track** — fast vs. slow sections highlighted
-- Hover over any point to see the actual text snippet from that section
+### Book Detail
+Full arc visualization: AreaChart (intensity, mood, pace), chapter reference lines, character swimlane timeline, stat badges (overall intensity, climax %, climax position, chapter count), theme tags.
 
-### Compare Mode
-Select 2–4 books and overlay their tension curves on the same graph. Color-coded per book. Useful for genre comparisons, same-author comparisons, or classic vs. modern.
+### Compare
+Overlay tension curves for 2–4 books on the same chart. Color-coded lines, book title tooltips on hover. After comparing, a **Verdict card** scores each book on a weighted composite (intensity × 0.5 + pace × 0.3 + mood × 0.2) and recommends which to read first with a plain-English reason.
 
-### Explore View
-BigQuery-powered cross-book analytics:
-- Average tension curve by genre (Gothic horror vs. Romance vs. Adventure)
-- Tension curve similarity clusters — books grouped by story shape, not genre label
-- Author signature charts — how a given author's tension patterns vary across their catalog
-- Era trends — do Victorian novels build tension differently than 20th century ones?
-
-### Upload a PDF
-Drop in any book PDF. The backend extracts text, runs it through the same NLP pipeline (via a direct processing job, not Kafka), stores results, and renders the arc. Compare against the Gutenberg baseline.
+### Explore
+BigQuery-powered genre fingerprints — average intensity, mood, and pace per subject, rendered as a color-interpolated bar chart. Toggle between metrics. Full sortable data table below.
 
 ---
 
 ## Project Structure
 
 ```
-overdue/
+bookish/
 ├── server/
-│   ├── terraform/           # GCP infra: BigQuery, GCS, Cloud Run, service accounts
-│   ├── ingester/            # Python: Gutenberg catalog + text → GCS + Kafka
-│   ├── chunker/             # Python: GCS text → Kafka book-chunks
-│   ├── nlp-worker/          # Python: NLP analysis → Kafka arc-events
-│   ├── stream-processor/    # Kotlin: Kafka arc-events → BigQuery sink
-│   ├── api/                 # Python FastAPI: arc data + analytics endpoints
-│   ├── scripts/             # BigQuery SQL views and one-off queries
-│   ├── requirements.txt
+│   ├── ingester/            # Gutenberg → local/GCS + Kafka + BigQuery
+│   ├── chunker/             # Kafka consumer: text → chunks → Kafka
+│   ├── nlp-worker/          # Kafka consumer: chunks → NLP → Kafka
+│   ├── stream-processor/    # Kafka consumer: arc-events → BigQuery
+│   │   └── src/             # Kotlin reference implementation (kept for learning)
+│   ├── api/                 # FastAPI: arc + analytics endpoints
+│   ├── scripts/
+│   │   └── build_characters.py   # Post-pipeline character aggregation
+│   ├── terraform/           # BigQuery dataset + tables as code
+│   ├── requirements.txt     # Shared across all Python services
+│   ├── orchestrate.py       # Master script: clean → ingest → chunk → NLP → sink → serve
 │   └── .env.example
-├── client/                  # Vite frontend
-├── docker-compose.yml       # Local orchestration
-├── .gitlab-ci.yml           # CI/CD pipeline
+├── client/                  # Vite + React + TypeScript
+│   └── src/
+│       ├── api/             # Typed fetch client
+│       ├── components/      # ArcChart, BookCard, Sparkline, Navbar
+│       └── pages/           # Library, BookDetail, Compare, Explore
+├── docker-compose.yml       # Full local orchestration
 └── README.md
 ```
 
 ---
 
-## API Endpoints
+## API
 
 | Endpoint | Description |
-|----------|-------------|
-| `GET /api/books` | Paginated book catalog with genre/era filters |
+|---|---|
+| `GET /api/books` | Paginated catalog, author/language filters |
 | `GET /api/books/{id}` | Book metadata |
-| `GET /api/books/{id}/arc` | Full arc data (all chunks) |
+| `GET /api/books/{id}/arc` | All arc chunks ordered by `chunk_index` |
 | `GET /api/books/{id}/characters` | Character presence data |
-| `GET /api/compare?ids=1,2,3` | Arc data for multiple books |
-| `GET /api/explore/genres` | Average tension curves by genre |
-| `GET /api/explore/authors/{name}` | Author arc signature across their catalog |
-| `POST /api/upload` | Upload a PDF for processing |
+| `GET /api/compare?ids=1,2,3` | Arc data grouped by `book_id` |
+| `GET /api/explore/genres` | Avg intensity/mood/pace per subject via `UNNEST` |
 
 ---
 
-## Local Kafka Setup
+## Running Locally
 
-Kafka runs on a separate machine on your local network via Docker. Only one config change is needed — the host machine needs to advertise its LAN IP so other machines on the network can connect.
-
-**On the Kafka host machine:**
+**1. Environment**
 ```bash
-# Find the LAN IP (e.g. 192.168.1.50)
-ipconfig getifaddr en0
-
-# Set it and start Kafka
-KAFKA_HOST_IP=192.168.1.50 docker compose up -d kafka
+cp server/.env.example server/.env
+# set GCP_PROJECT_ID, BQ_DATASET, KAFKA_BOOTSTRAP
 ```
 
-**On your dev machine**, set `KAFKA_BOOTSTRAP` in `server/.env`:
+**2. Infrastructure**
+```bash
+cd server/terraform && terraform init && terraform apply
 ```
-KAFKA_BOOTSTRAP=192.168.1.50:9092
+
+**3. Kafka** (on a separate machine or Docker locally)
+```bash
+# Set your LAN IP in docker-compose.yml KAFKA_ADVERTISED_LISTENERS
+docker compose up -d kafka
 ```
 
-That's it — no auth needed on a local network, it's PLAINTEXT.
+**4. Run everything**
+```bash
+cd server
+python orchestrate.py --limit 50
+# Cleans BQ tables → ingests → chunks → NLP → sinks → starts API + client
+```
 
----
-
-## Quick Start
-
-1. **Configure environment**
-   ```bash
-   cp server/.env.example server/.env
-   # Fill in GCP, Kafka bootstrap, and GCS credentials
-   ```
-
-2. **Provision infrastructure**
-   ```bash
-   cd server/terraform && terraform init && terraform apply
-   ```
-
-3. **Start Kafka** (on the host machine, see Local Kafka Setup above)
-
-4. **Run the pipeline**
-   ```bash
-   docker compose run ingester python -m ingester.main --limit 100
-   ```
-
-5. **Start the frontend**
-   ```bash
-   cd client && npm install && npm run dev
-   ```
+Or stage by stage:
+```bash
+python ingester/main.py --local --limit 50
+python chunker/main.py --drain
+python nlp-worker/main.py --drain
+python stream-processor/main.py --drain
+python scripts/build_characters.py
+uvicorn api.main:app --port 8000
+cd ../client && npm run dev
+```
 
 ---
 
 ## Data Source
 
-**Project Gutenberg** via the [Gutendex API](https://gutendex.com) — 70,000+ public domain books with full text downloads, structured metadata (title, author, subjects, languages), and no API key required.
+[Project Gutenberg](https://www.gutenberg.org) via the [Gutendex API](https://gutendex.com) — 70,000+ public domain books, full text downloads, structured metadata. No API key required.
